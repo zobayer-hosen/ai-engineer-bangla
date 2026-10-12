@@ -1,0 +1,1074 @@
+openapi: 3.1.0
+info:
+  title: AI Engineer Learning App API
+  version: 1.0.0-draft
+  description: |
+    Draft contract derived from the Mobile App PRD (section 10). The Go backend owns the
+    final spec; regenerate the app types with `npm run api:types` whenever it changes.
+
+    Conventions:
+    - All paths are prefixed with `/api/v1`.
+    - Every error response uses the `ErrorResponse` envelope. `error.code` is a stable,
+      machine-readable code the app maps to Bangla text; `error.message` is for logs only and
+      is never shown to learners.
+    - Mutations marked idempotent accept an `Idempotency-Key` header; repeating a request with
+      the same key returns the original result instead of creating a duplicate.
+    - List endpoints are paginated with `page` (1-based) and `pageSize` (default 20).
+servers:
+  - url: https://api.example.com/api/v1
+    description: Placeholder — set per environment in app.config.ts
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+  - name: me
+  - name: roadmap
+  - name: courses
+  - name: lessons
+  - name: quizzes
+  - name: exercises
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created and signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      security: []
+      description: Rotates the refresh token. The previous refresh token stops working.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Refresh token revoked }
+
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      operationId: forgotPassword
+      security: []
+      description: Always returns 202, whether or not the email exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '202': { description: If the account exists, a reset email was sent }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /me:
+    get:
+      tags: [me]
+      operationId: getMe
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [me]
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMeRequest' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '422': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [me]
+      operationId: requestAccountDeletion
+      description: Schedules account deletion and revokes all sessions.
+      responses:
+        '202':
+          description: Deletion scheduled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountDeletion' }
+
+  /me/dashboard:
+    get:
+      tags: [me]
+      operationId: getDashboard
+      description: Everything the Home screen needs in one call.
+      responses:
+        '200':
+          description: Home dashboard
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Dashboard' }
+
+  /me/progress:
+    get:
+      tags: [me]
+      operationId: getProgress
+      responses:
+        '200':
+          description: Learner progress, calculated by the server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Progress' }
+
+  /me/courses:
+    get:
+      tags: [me]
+      operationId: getMyCourses
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema: { type: string, enum: [in_progress, completed] }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Enrolled courses
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnrolledCoursePage' }
+
+  /me/activity:
+    get:
+      tags: [me]
+      operationId: getActivity
+      description: Phase 2 — weekly activity chart.
+      responses:
+        '200':
+          description: Daily activity for the last 7 days
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Activity' }
+
+  /roadmap:
+    get:
+      tags: [roadmap]
+      operationId: getRoadmap
+      responses:
+        '200':
+          description: The 10 stages with the learner's status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Roadmap' }
+
+  /courses:
+    get:
+      tags: [courses]
+      operationId: listCourses
+      parameters:
+        - name: stage
+          in: query
+          schema: { type: string }
+        - name: difficulty
+          in: query
+          schema: { $ref: '#/components/schemas/Difficulty' }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Published courses
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CoursePage' }
+
+  /courses/{id}:
+    get:
+      tags: [courses]
+      operationId: getCourse
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Course details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CourseDetail' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /courses/{id}/modules:
+    get:
+      tags: [courses]
+      operationId: getCourseModules
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Modules with lessons and the learner's completion
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModuleList' }
+
+  /courses/{id}/enroll:
+    post:
+      tags: [courses]
+      operationId: enroll
+      description: Idempotent. Enrolling twice returns the existing enrollment.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Enrollment (new or existing)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+
+  /courses/{id}/exercises:
+    get:
+      tags: [exercises]
+      operationId: listExercises
+      description: New — not in the original spec. Coding practice list (APP-35).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Exercises with done state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExerciseList' }
+
+  /lessons/{id}:
+    get:
+      tags: [lessons]
+      operationId: getLesson
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Lesson content and the learner's progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Lesson' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /lessons/{id}/progress:
+    put:
+      tags: [lessons]
+      operationId: updateLessonProgress
+      description: Idempotent. Completing an already completed lesson is a no-op.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LessonProgressUpdate' }
+      responses:
+        '200':
+          description: Saved progress
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LessonProgressResult' }
+
+  /quizzes/{id}:
+    get:
+      tags: [quizzes]
+      operationId: getQuiz
+      description: Questions and options only — correct answers are never sent before submission.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Quiz
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Quiz' }
+
+  /quizzes/{id}/attempts:
+    get:
+      tags: [quizzes]
+      operationId: listQuizAttempts
+      description: New — attempt history (APP-42).
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Previous attempts, newest first
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizAttemptList' }
+    post:
+      tags: [quizzes]
+      operationId: submitQuizAttempt
+      description: The server scores the attempt. Idempotent per Idempotency-Key.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuizSubmission' }
+      responses:
+        '201':
+          description: Scored attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizAttempt' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /quiz-attempts/{id}:
+    get:
+      tags: [quizzes]
+      operationId: getQuizAttempt
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Scored attempt with explanations
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuizAttempt' }
+
+  /exercises/{id}:
+    get:
+      tags: [exercises]
+      operationId: getExercise
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Exercise (without the correct answer)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Exercise' }
+
+  /exercises/{id}/attempts:
+    post:
+      tags: [exercises]
+      operationId: submitExerciseAttempt
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExerciseSubmission' }
+      responses:
+        '201':
+          description: Graded answer
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExerciseResult' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 64 }
+
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_ERROR
+        - INVALID_CREDENTIALS
+        - EMAIL_TAKEN
+        - UNAUTHORIZED
+        - TOKEN_EXPIRED
+        - FORBIDDEN
+        - NOT_FOUND
+        - NOT_ENROLLED
+        - RETRY_NOT_ALLOWED
+        - CONFLICT
+        - RATE_LIMITED
+        - INTERNAL
+        - SERVICE_UNAVAILABLE
+
+    FieldErrorCode:
+      type: string
+      enum:
+        - REQUIRED
+        - INVALID_EMAIL
+        - PASSWORD_TOO_SHORT
+        - NAME_TOO_LONG
+        - EMAIL_TAKEN
+        - INVALID_VALUE
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            message:
+              type: string
+              description: Developer-facing; never shown in the app.
+            fields:
+              type: object
+              additionalProperties: { $ref: '#/components/schemas/FieldErrorCode' }
+
+    Level:
+      type: string
+      enum: [beginner, intermediate, advanced]
+
+    Goal:
+      type: string
+      enum: [ml_engineer, genai_engineer, data_scientist, exploring]
+
+    Difficulty:
+      type: string
+      enum: [beginner, intermediate, advanced]
+
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    AuthSession:
+      type: object
+      required: [accessToken, refreshToken, expiresIn, user]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds
+        user: { $ref: '#/components/schemas/User' }
+
+    StageRef:
+      type: object
+      required: [id, number, title]
+      properties:
+        id: { type: string }
+        number: { type: integer, minimum: 1, maximum: 10 }
+        title: { type: string }
+
+    User:
+      type: object
+      required: [id, name, email, level, goal, recommendedStage, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        level:
+          oneOf:
+            - { $ref: '#/components/schemas/Level' }
+            - { type: 'null' }
+        goal:
+          oneOf:
+            - { $ref: '#/components/schemas/Goal' }
+            - { type: 'null' }
+        recommendedStage:
+          description: Set once level and goal are known.
+          oneOf:
+            - { $ref: '#/components/schemas/StageRef' }
+            - { type: 'null' }
+        recommendedCourseId:
+          type: [string, 'null']
+        createdAt: { type: string, format: date-time }
+
+    UpdateMeRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 80 }
+        level: { $ref: '#/components/schemas/Level' }
+        goal: { $ref: '#/components/schemas/Goal' }
+
+    AccountDeletion:
+      type: object
+      required: [status, scheduledFor]
+      properties:
+        status: { type: string, enum: [scheduled] }
+        scheduledFor: { type: string, format: date-time }
+
+    Streak:
+      type: object
+      required: [current, longest, activeToday]
+      properties:
+        current: { type: integer, minimum: 0 }
+        longest: { type: integer, minimum: 0 }
+        activeToday: { type: boolean }
+
+    LessonRef:
+      type: object
+      required: [id, title, courseId, courseTitle]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        courseId: { type: string }
+        courseTitle: { type: string }
+        completedAt: { type: [string, 'null'], format: date-time }
+
+    ContinueLearning:
+      type: object
+      required: [lessonId, lessonTitle, courseId, courseTitle, courseProgress]
+      properties:
+        lessonId: { type: string }
+        lessonTitle: { type: string }
+        courseId: { type: string }
+        courseTitle: { type: string }
+        courseProgress: { type: integer, minimum: 0, maximum: 100 }
+
+    Dashboard:
+      type: object
+      required:
+        [continueLearning, currentStage, overallProgress, streak, recommendedLessons, recentlyCompleted, recommendedCourse]
+      properties:
+        continueLearning:
+          oneOf:
+            - { $ref: '#/components/schemas/ContinueLearning' }
+            - { type: 'null' }
+        currentStage:
+          oneOf:
+            - { $ref: '#/components/schemas/StageRef' }
+            - { type: 'null' }
+        overallProgress: { type: integer, minimum: 0, maximum: 100 }
+        streak: { $ref: '#/components/schemas/Streak' }
+        recommendedLessons:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/LessonRef' }
+        recentlyCompleted:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/LessonRef' }
+        recommendedCourse:
+          description: Shown in the empty state for new users.
+          oneOf:
+            - { $ref: '#/components/schemas/CourseSummary' }
+            - { type: 'null' }
+
+    StageProgress:
+      type: object
+      required: [stage, progress]
+      properties:
+        stage: { $ref: '#/components/schemas/StageRef' }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+
+    Progress:
+      type: object
+      required:
+        [overallProgress, stages, lessonsCompleted, lessonsTotal, quizzesPassed, quizzesTotal, streak]
+      properties:
+        overallProgress: { type: integer, minimum: 0, maximum: 100 }
+        stages:
+          type: array
+          items: { $ref: '#/components/schemas/StageProgress' }
+        lessonsCompleted: { type: integer }
+        lessonsTotal: { type: integer }
+        quizzesPassed: { type: integer }
+        quizzesTotal: { type: integer }
+        streak: { $ref: '#/components/schemas/Streak' }
+
+    Activity:
+      type: object
+      required: [days]
+      properties:
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, lessonsCompleted, minutes]
+            properties:
+              date: { type: string, format: date }
+              lessonsCompleted: { type: integer }
+              minutes: { type: integer }
+
+    StageStatus:
+      type: string
+      enum: [not_started, in_progress, completed]
+
+    RoadmapStage:
+      type: object
+      required: [id, number, title, description, courseCount, status, progress, recommendedFirst]
+      properties:
+        id: { type: string }
+        number: { type: integer, minimum: 1, maximum: 10 }
+        title: { type: string }
+        description: { type: string }
+        courseCount: { type: integer }
+        status: { $ref: '#/components/schemas/StageStatus' }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        recommendedFirst:
+          description: Earliest prerequisite stage the learner has not completed. Stages are never locked.
+          oneOf:
+            - { $ref: '#/components/schemas/StageRef' }
+            - { type: 'null' }
+
+    Roadmap:
+      type: object
+      required: [stages]
+      properties:
+        stages:
+          type: array
+          items: { $ref: '#/components/schemas/RoadmapStage' }
+
+    CourseSummary:
+      type: object
+      required: [id, title, stage, difficulty, durationMinutes, lessonCount, enrolled, progress]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        stage: { $ref: '#/components/schemas/StageRef' }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        durationMinutes: { type: integer }
+        lessonCount: { type: integer }
+        enrolled: { type: boolean }
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: 0 when not enrolled
+
+    PageMeta:
+      type: object
+      required: [page, pageSize, total, hasMore]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        hasMore: { type: boolean }
+
+    CoursePage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/CourseSummary' }
+
+    EnrolledCourse:
+      allOf:
+        - $ref: '#/components/schemas/CourseSummary'
+        - type: object
+          required: [lastLessonId, completedAt, exerciseCount, exercisesDone]
+          properties:
+            lastLessonId: { type: [string, 'null'] }
+            completedAt: { type: [string, 'null'], format: date-time }
+            exerciseCount: { type: integer }
+            exercisesDone: { type: integer }
+
+    EnrolledCoursePage:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/EnrolledCourse' }
+
+    CourseRef:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+
+    CourseDetail:
+      allOf:
+        - $ref: '#/components/schemas/CourseSummary'
+        - type: object
+          required: [description, author, prerequisites, objectives, firstLessonId, lastLessonId, exerciseCount, completedAt]
+          properties:
+            description: { type: string }
+            author:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+            prerequisites:
+              type: array
+              items: { $ref: '#/components/schemas/CourseRef' }
+            objectives:
+              type: array
+              items: { type: string }
+            firstLessonId: { type: [string, 'null'] }
+            lastLessonId:
+              type: [string, 'null']
+              description: Last lesson the learner opened in this course
+            exerciseCount: { type: integer }
+            completedAt: { type: [string, 'null'], format: date-time }
+
+    ModuleLesson:
+      type: object
+      required: [id, title, order, durationMinutes, completed]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        order: { type: integer }
+        durationMinutes: { type: integer }
+        completed: { type: boolean }
+
+    ModuleQuizRef:
+      type: object
+      required: [id, title, questionCount, passed]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        questionCount: { type: integer }
+        passed: { type: boolean }
+
+    CourseModule:
+      type: object
+      required: [id, title, order, lessons, quiz, completed]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        order: { type: integer }
+        lessons:
+          type: array
+          items: { $ref: '#/components/schemas/ModuleLesson' }
+        quiz:
+          oneOf:
+            - { $ref: '#/components/schemas/ModuleQuizRef' }
+            - { type: 'null' }
+        completed: { type: boolean }
+
+    ModuleList:
+      type: object
+      required: [modules]
+      properties:
+        modules:
+          type: array
+          items: { $ref: '#/components/schemas/CourseModule' }
+
+    Enrollment:
+      type: object
+      required: [courseId, enrolledAt, progress, firstLessonId]
+      properties:
+        courseId: { type: string }
+        enrolledAt: { type: string, format: date-time }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        firstLessonId: { type: [string, 'null'] }
+
+    LessonProgress:
+      type: object
+      required: [completed, scrollPosition, completedAt]
+      properties:
+        completed: { type: boolean }
+        scrollPosition:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Fraction of the lesson scrolled (0–1), independent of font size and screen
+        completedAt: { type: [string, 'null'], format: date-time }
+
+    Lesson:
+      type: object
+      required:
+        [id, title, courseId, courseTitle, moduleId, moduleTitle, order, durationMinutes, content, keyTakeaways, previousLessonId, nextLessonId, nextQuizId, progress]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        courseId: { type: string }
+        courseTitle: { type: string }
+        moduleId: { type: string }
+        moduleTitle: { type: string }
+        order: { type: integer }
+        durationMinutes: { type: integer }
+        content:
+          type: string
+          description: Markdown (CommonMark + GFM tables)
+        keyTakeaways:
+          type: array
+          items: { type: string }
+        previousLessonId: { type: [string, 'null'] }
+        nextLessonId: { type: [string, 'null'] }
+        nextQuizId:
+          type: [string, 'null']
+          description: Set on the last lesson of a module that has a quiz
+        progress: { $ref: '#/components/schemas/LessonProgress' }
+
+    LessonProgressUpdate:
+      type: object
+      properties:
+        scrollPosition: { type: number, minimum: 0, maximum: 1 }
+        completed: { type: boolean, enum: [true] }
+
+    LessonProgressResult:
+      type: object
+      required: [lessonId, progress, courseProgress, courseCompleted, streak]
+      properties:
+        lessonId: { type: string }
+        progress: { $ref: '#/components/schemas/LessonProgress' }
+        courseProgress: { type: integer, minimum: 0, maximum: 100 }
+        courseCompleted: { type: boolean }
+        streak: { $ref: '#/components/schemas/Streak' }
+
+    Option:
+      type: object
+      required: [id, text]
+      properties:
+        id: { type: string }
+        text: { type: string }
+
+    QuizQuestion:
+      type: object
+      required: [id, order, prompt, code, codeLanguage, options]
+      properties:
+        id: { type: string }
+        order: { type: integer }
+        prompt: { type: string }
+        code: { type: [string, 'null'] }
+        codeLanguage: { type: [string, 'null'] }
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/Option' }
+
+    RetryPolicy:
+      type: object
+      required: [allowed, maxAttempts, attemptsUsed]
+      properties:
+        allowed: { type: boolean }
+        maxAttempts:
+          type: [integer, 'null']
+          description: null = unlimited
+        attemptsUsed: { type: integer }
+
+    Quiz:
+      type: object
+      required: [id, title, courseId, moduleId, passMark, questionCount, retryPolicy, questions, bestScore, passed]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        courseId: { type: string }
+        moduleId: { type: string }
+        passMark:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Percentage needed to pass
+        questionCount: { type: integer }
+        retryPolicy: { $ref: '#/components/schemas/RetryPolicy' }
+        questions:
+          type: array
+          items: { $ref: '#/components/schemas/QuizQuestion' }
+        bestScore: { type: [integer, 'null'] }
+        passed: { type: boolean }
+
+    QuizSubmission:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: array
+          items:
+            type: object
+            required: [questionId, optionId]
+            properties:
+              questionId: { type: string }
+              optionId: { type: string }
+
+    QuestionResult:
+      type: object
+      required: [questionId, prompt, code, codeLanguage, options, selectedOptionId, correctOptionId, correct, explanation]
+      properties:
+        questionId: { type: string }
+        prompt: { type: string }
+        code: { type: [string, 'null'] }
+        codeLanguage: { type: [string, 'null'] }
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/Option' }
+        selectedOptionId: { type: [string, 'null'] }
+        correctOptionId: { type: string }
+        correct: { type: boolean }
+        explanation: { type: string }
+
+    QuizAttemptSummary:
+      type: object
+      required: [id, quizId, score, passed, submittedAt]
+      properties:
+        id: { type: string }
+        quizId: { type: string }
+        score: { type: integer, minimum: 0, maximum: 100 }
+        passed: { type: boolean }
+        submittedAt: { type: string, format: date-time }
+
+    QuizAttempt:
+      allOf:
+        - $ref: '#/components/schemas/QuizAttemptSummary'
+        - type: object
+          required: [quizTitle, courseId, moduleCompleted, correctCount, totalCount, passMark, canRetry, results]
+          properties:
+            quizTitle: { type: string }
+            courseId: { type: string }
+            moduleCompleted: { type: boolean }
+            correctCount: { type: integer }
+            totalCount: { type: integer }
+            passMark: { type: integer }
+            canRetry: { type: boolean }
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/QuestionResult' }
+
+    QuizAttemptList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/QuizAttemptSummary' }
+
+    ExerciseType:
+      type: string
+      enum: [read_code, fill_blank, spot_bug]
+
+    ExerciseSummary:
+      type: object
+      required: [id, title, type, order, done]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        type: { $ref: '#/components/schemas/ExerciseType' }
+        order: { type: integer }
+        done: { type: boolean }
+
+    ExerciseList:
+      type: object
+      required: [courseId, courseTitle, items]
+      properties:
+        courseId: { type: string }
+        courseTitle: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ExerciseSummary' }
+
+    Exercise:
+      type: object
+      required: [id, courseId, title, type, prompt, code, language, options, done, nextExerciseId]
+      properties:
+        id: { type: string }
+        courseId: { type: string }
+        title: { type: string }
+        type: { $ref: '#/components/schemas/ExerciseType' }
+        prompt: { type: string }
+        code: { type: string }
+        language: { type: string }
+        options:
+          type: array
+          items: { $ref: '#/components/schemas/Option' }
+        done: { type: boolean }
+        nextExerciseId: { type: [string, 'null'] }
+
+    ExerciseSubmission:
+      type: object
+      required: [optionId]
+      properties:
+        optionId: { type: string }
+
+    ExerciseResult:
+      type: object
+      required: [exerciseId, correct, selectedOptionId, correctOptionId, explanation, done]
+      properties:
+        exerciseId: { type: string }
+        correct: { type: boolean }
+        selectedOptionId: { type: string }
+        correctOptionId: { type: string }
+        explanation: { type: string }
+        done: { type: boolean }
